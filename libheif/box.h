@@ -47,6 +47,38 @@ namespace heif {
   };
 
 
+  class BitstreamRange
+  {
+  public:
+    BitstreamRange(uint64_t length) {
+      m_remaining = length;
+      m_end_reached = (length==0);
+    }
+
+    void operator-=(int len) {
+      if (len < m_remaining) {
+        m_remaining -= len;
+      }
+      else {
+        m_remaining = 0;
+        m_end_reached = true;
+      }
+    }
+
+    bool bytes_left(int n) {
+      return m_remaining>=n;
+    }
+
+    bool eof() const {
+      return m_end_reached;
+    }
+
+  private:
+    uint64_t m_remaining;
+    bool m_end_reached = false;
+  };
+
+
   class BoxHeader {
   public:
     BoxHeader();
@@ -107,6 +139,8 @@ namespace heif {
   BoxFull(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
+
+    uint8_t get_version() const { return m_version; }
 
   protected:
     Error parse(std::istream& istr, uint64_t& sizeLimit) override;
@@ -201,6 +235,41 @@ namespace heif {
     };
 
     std::vector<Item> m_items;
+  };
+
+
+  class Box_infe : public BoxFull {
+  public:
+  Box_infe(const BoxHeader& hdr) : BoxFull(hdr) { }
+
+    std::string dump() const override;
+
+  protected:
+    Error parse(std::istream& istr, uint64_t& sizeLimit);
+
+  private:
+      uint16_t m_item_ID;
+      uint16_t m_item_protection_index;
+
+      std::string m_item_type;
+      std::string m_item_name;
+      std::string m_content_type;
+      std::string m_content_encoding;
+      std::string m_item_uri_type;
+    };
+
+
+  class Box_iinf : public BoxFull {
+  public:
+  Box_iinf(const BoxHeader& hdr) : BoxFull(hdr) { }
+
+    std::string dump() const override;
+
+  protected:
+    Error parse(std::istream& istr, uint64_t& sizeLimit);
+
+  private:
+    std::vector< std::shared_ptr<Box_infe> > m_iteminfos;
   };
 }
 

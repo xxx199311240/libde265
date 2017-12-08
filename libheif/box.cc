@@ -81,6 +81,65 @@ uint32_t read32(std::istream& istr)
 }
 
 
+uint16_t read16(std::istream& istr, uint64_t& sizeLimit)
+{
+  if (sizeLimit<2) {
+    sizeLimit=0;
+    return 0;
+  }
+
+  uint8_t buf[2];
+
+  istr.read((char*)buf,2);
+  sizeLimit -= 2;
+
+  return ((buf[0]<<8) | (buf[1]));
+}
+
+
+uint32_t read32(std::istream& istr, uint64_t& sizeLimit)
+{
+  if (sizeLimit<4) {
+    sizeLimit=0;
+    return 0;
+  }
+
+  uint8_t buf[4];
+
+  istr.read((char*)buf,4);
+  sizeLimit -= 4;
+
+  return ((buf[0]<<24) |
+          (buf[1]<<16) |
+          (buf[2]<< 8) |
+          (buf[3]));
+}
+
+
+std::string read_string(std::istream& istr, uint64_t& sizeLimit)
+{
+  std::string str;
+
+  for (;;) {
+    if (sizeLimit==0) {
+      return std::string();
+    }
+
+    int c = istr.get();
+    sizeLimit--;
+
+    if (c==0) {
+      break;
+    }
+    else {
+      str += (char)c;
+    }
+  }
+
+  return str;
+}
+
+
 std::vector<uint8_t> heif::BoxHeader::get_type() const
 {
   if (m_type == fourcc("uuid")) {
@@ -225,6 +284,14 @@ std::shared_ptr<heif::Box> Box::read(std::istream& istr, uint64_t& sizeLimit)
 
   case fourcc("iloc"):
     box = std::make_shared<Box_iloc>(hdr);
+    break;
+
+  case fourcc("iinf"):
+    box = std::make_shared<Box_iinf>(hdr);
+    break;
+
+  case fourcc("infe"):
+    box = std::make_shared<Box_infe>(hdr);
     break;
 
   default:
@@ -405,21 +472,7 @@ Error Box_hdlr::parse(std::istream& istr, uint64_t& sizeLimit)
 
   sizeLimit -= 5*4;
 
-  for (;;) {
-    if (sizeLimit==0) {
-      return Error::EndOfData;
-    }
-
-    int c = istr.get();
-    sizeLimit--;
-
-    if (c==0) {
-      break;
-    }
-    else {
-      m_name += (char)c;
-    }
-  }
+  m_name = read_string(istr, sizeLimit);
 
   return Error::OK;
 }
@@ -464,9 +517,11 @@ std::string Box_pitm::dump() const
 
 Error Box_iloc::parse(std::istream& istr, uint64_t& sizeLimit)
 {
+  /*
   printf("box size: %d\n",get_box_size());
   printf("header size: %d\n",get_header_size());
   printf("start limit: %d\n",sizeLimit);
+  */
 
   BoxFull::parse(istr, sizeLimit);
 
@@ -545,7 +600,7 @@ Error Box_iloc::parse(std::istream& istr, uint64_t& sizeLimit)
     m_items.push_back(item);
   }
 
-  printf("end limit: %d\n",sizeLimit);
+  //printf("end limit: %d\n",sizeLimit);
 
   return Error::OK;
 }
@@ -567,6 +622,124 @@ std::string Box_iloc::dump() const
     }
     sstr << "\n";
   }
+
+  return sstr.str();
+}
+
+
+Error Box_infe::parse(std::istream& istr, uint64_t& sizeLimit)
+{
+  BoxFull::parse(istr, sizeLimit);
+
+  if (get_version() <= 1) {
+    if (sizeLimit < 4+3) {
+      return Error::EndOfData;
+    }
+
+    m_item_ID = read16(istr);
+    m_item_protection_index = read16(istr);
+    sizeLimit -= 4;
+
+    m_item_name = read_string(istr, sizeLimit);
+    m_content_type = read_string(istr, sizeLimit);
+    m_content_encoding = read_string(istr, sizeLimit);
+  }
+
+  if (get_version() >= 2) {
+    if (get_version() == 2) {
+      m_item_ID = read16(istr, sizeLimit);
+    }
+    else {
+      m_item_ID = read32(istr, sizeLimit);
+    }
+
+    m_item_protection_index = read16(istr, sizeLimit);
+    uint32_t item_type =read32(istr, sizeLimit);
+    if (item_type != 0) {
+      m_item_type = to_fourcc(read32(istr, sizeLimit));
+    }
+
+    m_item_name = read_string(istr, sizeLimit);
+    if (item_type == fourcc("mime")) {
+      m_content_type = read_string(istr, sizeLimit);
+      m_content_encoding = read_string(istr, sizeLimit);
+    }
+    else if (item_type == fourcc("uri ")) {
+      m_item_uri_type = read_string(istr, sizeLimit);
+    }
+  }
+
+  return Error::OK;
+}
+
+
+std::string Box_infe::dump() const
+{
+  std::stringstream sstr;
+  sstr << BoxFull::dump();
+
+  sstr << "item_ID: " << m_item_ID << "\n"
+       << "item_protection_index: " << m_item_protection_index << "\n"
+       << "item_type: " << m_item_type << "\n"
+       << "item_name: " << m_item_name << "\n"
+       << "content_type: " << m_content_type << "\n"
+       << "content_encoding: " << m_content_encoding << "\n"
+       << "item uri type: " << m_item_uri_type << "\n";
+
+  return sstr.str();
+}
+
+
+Error Box_iinf::parse(std::istream& istr, uint64_t& sizeLimit)
+{
+  BoxFull::parse(istr, sizeLimit);
+
+  int nEntries_size = (get_version() > 0) ? 4 : 2;
+
+  if (sizeLimit < nEntries_size) {
+    return Error::EndOfData;
+  }
+
+  int item_count;
+  if (nEntries_size==2) {
+    item_count = read16(istr);
+  }
+  else {
+    item_count = read32(istr);
+  }
+
+  sizeLimit -= nEntries_size;
+
+  uint64_t boxSize = get_box_size() - get_header_size() - 4 - nEntries_size;
+  uint64_t initialBoxSize = boxSize;
+
+  for (int i=0;i<item_count;i++) {
+    auto box = std::dynamic_pointer_cast<Box_infe>(Box::read(istr, boxSize));
+    if (box) {
+      m_iteminfos.push_back(box);
+    }
+    else {
+      return Error(Error::EndOfData);
+    }
+  }
+
+  int dataRead = initialBoxSize - boxSize;
+  sizeLimit -= dataRead;
+
+  return Error::OK;
+}
+
+
+std::string Box_iinf::dump() const
+{
+  std::stringstream sstr;
+  sstr << BoxFull::dump();
+
+  sstr << ">>> items >>>\n";
+  for (auto& item : m_iteminfos) {
+    sstr << item->dump();
+  }
+  sstr << "<<< items <<<\n";
 
   return sstr.str();
 }
