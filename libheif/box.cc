@@ -58,6 +58,26 @@ heif::BoxHeader::BoxHeader()
 }
 
 
+uint16_t read8(BitstreamRange& range)
+{
+  if (!range.read(1)) {
+    return 0;
+  }
+
+  uint8_t buf;
+
+  std::istream* istr = range.get_istream();
+  istr->read((char*)&buf,1);
+
+  if (istr->fail()) {
+    range.set_eof_reached();
+    return 0;
+  }
+
+  return buf;
+}
+
+
 uint16_t read16(BitstreamRange& range)
 {
   if (!range.read(2)) {
@@ -304,6 +324,10 @@ std::shared_ptr<heif::Box> Box::read(BitstreamRange& range)
 
   case fourcc("ispe"):
     box = std::make_shared<Box_ispe>(hdr);
+    break;
+
+  case fourcc("hvcC"):
+    box = std::make_shared<Box_hvcC>(hdr);
     break;
 
   default:
@@ -751,6 +775,119 @@ std::string Box_ispe::dump() const
 
   sstr << "image width: " << m_image_width << "\n"
        << "image height: " << m_image_height << "\n";
+
+  return sstr.str();
+}
+
+
+Error Box_hvcC::parse(BitstreamRange& range)
+{
+  //parse_full_box_header(range);
+
+  uint8_t byte;
+
+  m_configuration_version = read8(range);
+  byte = read8(range);
+  m_general_profile_space = (byte>>6) & 3;
+  m_general_tier_flag = (byte>>5) & 1;
+  m_general_profile_idc = (byte & 0x1F);
+
+  m_general_profile_compatibility_flags = read32(range);
+
+  for (int i=0; i<6; i++)
+    {
+      byte = read8(range);
+
+      for (int b=0;b<8;b++) {
+        m_general_constraint_indicator_flags[i*8+b] = (byte >> (7-b)) & 1;
+      }
+    }
+
+  m_general_level_idc = read8(range);
+  m_min_spatial_segmentation_idc = read16(range) & 0x0FFF;
+  m_parallelism_type = read8(range) & 0x03;
+  m_chroma_format = read8(range) & 0x03;
+  m_bit_depth_luma = (read8(range) & 0x07) + 8;
+  m_bit_depth_chroma = (read8(range) & 0x07) + 8;
+  m_avg_frame_rate = read16(range);
+
+  byte = read8(range);
+  m_constant_frame_rate = (byte >> 6) & 0x03;
+  m_num_temporal_layers = (byte >> 3) & 0x07;
+  m_temporal_id_nested = (byte >> 2) & 1;
+  m_length_size = (byte & 0x03) + 1;
+
+  int nArrays = read8(range);
+
+  for (int i=0; i<nArrays; i++)
+    {
+      byte = read8(range);
+
+      NalArray array;
+
+      array.m_array_completeness = (byte >> 6) & 1;
+      array.m_NAL_unit_type = (byte & 0x3F);
+
+      int nUnits = read16(range);
+      for (int u=0; u<nUnits; u++) {
+
+        std::vector<uint8_t> nal_unit;
+        int size = read16(range);
+        if (range.read(size)) {
+          nal_unit.resize(size);
+          range.get_istream()->read((char*)nal_unit.data(), size);
+        }
+
+        array.m_nal_units.push_back( std::move(nal_unit) );
+      }
+
+      m_nal_array.push_back( std::move(array) );
+    }
+
+  range.skip_to_end_of_box();
+
+  return range.get_error();
+}
+
+
+std::string Box_hvcC::dump() const
+{
+  std::stringstream sstr;
+  sstr << Box::dump();
+
+  sstr << "configuration_version: " << ((int)m_configuration_version) << "\n"
+       << "general_profile_space: " << ((int)m_general_profile_space) << "\n"
+       << "general_tier_flag: " << m_general_tier_flag << "\n"
+       << "general_profile_idc: " << ((int)m_general_profile_idc) << "\n"
+       << "general_profile_compatibility_flags: 0x" << std::hex << m_general_profile_compatibility_flags << std::dec << "\n"
+       << "general_constraint_indicator_flags: " << "---TODO---\n"
+       << "general_level_idc: " << ((int)m_general_level_idc) << "\n"
+       << "min_spatial_segmentation_idc: " << m_min_spatial_segmentation_idc << "\n"
+       << "parallelism_type: " << ((int)m_parallelism_type) << "\n"
+       << "chroma_format: " << ((int)m_chroma_format) << "\n"
+       << "bit_depth_luma: " << ((int)m_bit_depth_luma) << "\n"
+       << "bit_depth_chroma: " << ((int)m_bit_depth_chroma) << "\n"
+       << "avg_frame_rate: " << m_avg_frame_rate << "\n"
+       << "constant_frame_rate: " << ((int)m_constant_frame_rate) << "\n"
+       << "num_temporal_layers: " << ((int)m_num_temporal_layers) << "\n"
+       << "temporal_id_nested: " << ((int)m_temporal_id_nested) << "\n"
+       << "length_size: " << ((int)m_length_size) << "\n";
+
+  for (const auto& array : m_nal_array) {
+    sstr << "<array>\n"
+         << "array_completeness: " << ((int)array.m_array_completeness) << "\n"
+         << "NAL_unit_type: " << ((int)array.m_NAL_unit_type) << "\n";
+
+    for (const auto& unit : array.m_nal_units) {
+      //sstr << "  unit with " << unit.size() << " bytes of data\n";
+      sstr << std::hex << std::setw(2) << std::setfill('0');
+      for (uint8_t b : unit) {
+        sstr << ((int)b) << " ";
+      }
+      sstr << "\n";
+      sstr << std::dec;
+    }
+  }
 
   return sstr.str();
 }

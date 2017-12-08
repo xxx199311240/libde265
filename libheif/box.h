@@ -93,6 +93,15 @@ namespace heif {
       m_end_reached = true;
     }
 
+    void skip_to_end_of_box() {
+      if (m_remaining) {
+        m_istr->seekg(m_remaining, std::ios_base::cur);
+        m_remaining = 0;
+      }
+
+      m_end_reached = true;
+    }
+
     void set_eof_reached() {
       m_remaining = 0;
       m_end_reached = true;
@@ -369,6 +378,47 @@ namespace heif {
   private:
     uint32_t m_image_width;
     uint32_t m_image_height;
+  };
+
+
+  class Box_hvcC : public Box {
+  public:
+  Box_hvcC(const BoxHeader& hdr) : Box(hdr) { }
+
+    std::string dump() const override;
+
+  protected:
+    Error parse(BitstreamRange& range);
+
+  private:
+    uint8_t  m_configuration_version;
+    uint8_t  m_general_profile_space;
+    bool     m_general_tier_flag;
+    uint8_t  m_general_profile_idc;
+    uint32_t m_general_profile_compatibility_flags;
+    std::array<bool,48> m_general_constraint_indicator_flags;
+    uint8_t  m_general_level_idc;
+
+    uint16_t m_min_spatial_segmentation_idc;
+    uint8_t  m_parallelism_type;
+    uint8_t  m_chroma_format;
+    uint8_t  m_bit_depth_luma;
+    uint8_t  m_bit_depth_chroma;
+    uint16_t m_avg_frame_rate;
+
+    uint8_t  m_constant_frame_rate;
+    uint8_t  m_num_temporal_layers;
+    uint8_t  m_temporal_id_nested;
+    uint8_t  m_length_size;
+
+    struct NalArray {
+      uint8_t m_array_completeness;
+      uint8_t m_NAL_unit_type;
+
+      std::vector< std::vector<uint8_t> > m_nal_units;
+    };
+
+    std::vector<NalArray> m_nal_array;
   };
 }
 
