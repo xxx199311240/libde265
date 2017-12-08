@@ -11,11 +11,13 @@ int main(int argc, char** argv)
 
   std::ifstream istr(argv[1]);
 
-  for (;;) {
-    uint64_t maxSize = std::numeric_limits<uint64_t>::max();
-    auto box = Box::read(istr, maxSize);
+  uint64_t maxSize = std::numeric_limits<uint64_t>::max();
+  heif::BitstreamRange range(&istr, maxSize);
 
-    if (istr.fail()) {
+  for (;;) {
+    auto box = Box::read(range);
+
+    if (!box || range.error()) {
       break;
     }
 

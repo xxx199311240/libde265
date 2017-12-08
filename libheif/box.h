@@ -26,6 +26,7 @@
 #include <string>
 #include <memory>
 #include <limits>
+#include <istream>
 
 
 namespace heif {
@@ -50,32 +51,83 @@ namespace heif {
   class BitstreamRange
   {
   public:
-    BitstreamRange(uint64_t length) {
+    BitstreamRange(std::istream* istr, uint64_t length, BitstreamRange* parent = nullptr) {
       m_remaining = length;
       m_end_reached = (length==0);
+
+      m_istr = istr;
+      m_parent_range = parent;
     }
 
-    void operator-=(int len) {
-      if (len < m_remaining) {
-        m_remaining -= len;
+    bool read(int n) {
+      if (m_remaining>=n) {
+        if (m_parent_range) {
+          m_parent_range->read(n);
+        }
+
+        m_remaining -= n;
+        m_end_reached = (m_remaining==0);
+
+        return true;
+      }
+      else if (m_remaining==0) {
+        m_error = true;
+        return false;
       }
       else {
+        if (m_parent_range) {
+          m_parent_range->read(m_remaining);
+        }
+
+        m_istr->seekg(m_remaining, std::ios::cur);
         m_remaining = 0;
         m_end_reached = true;
+        m_error = true;
+        return false;
       }
     }
 
-    bool bytes_left(int n) {
-      return m_remaining>=n;
+    void skip_to_end_of_file() {
+      m_istr->seekg(0, std::ios_base::end);
+      m_remaining = 0;
+      m_end_reached = true;
+    }
+
+    void set_eof_reached() {
+      m_remaining = 0;
+      m_end_reached = true;
+
+      if (m_parent_range) {
+        m_parent_range->set_eof_reached();
+      }
     }
 
     bool eof() const {
       return m_end_reached;
     }
 
+    bool error() const {
+      return m_error;
+    }
+
+    Error get_error() const {
+      if (m_error) {
+        return Error(Error::EndOfData);
+      }
+      else {
+        return Error::OK;
+      }
+    }
+
+    std::istream* get_istream() { return m_istr; }
+
   private:
+    std::istream* m_istr = nullptr;
+    BitstreamRange* m_parent_range = nullptr;
+
     uint64_t m_remaining;
     bool m_end_reached = false;
+    bool m_error = false;
   };
 
 
@@ -96,11 +148,18 @@ namespace heif {
 
     std::string get_type_string() const;
 
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
     Error write(std::ostream& ostr) const;
 
     std::string dump() const;
+
+
+    // --- full box
+
+    Error parse_full_box_header(BitstreamRange& range);
+
+    uint8_t get_version() const { return m_version; }
 
   private:
     uint64_t m_size = 0;
@@ -108,6 +167,12 @@ namespace heif {
 
     uint32_t m_type = 0;
     std::vector<uint8_t> m_uuid_type;
+
+
+    bool m_is_full_box = false;
+
+    uint8_t m_version = 0;
+    uint32_t m_flags = 0;
   };
 
 
@@ -117,39 +182,36 @@ namespace heif {
     Box(const BoxHeader& hdr) : BoxHeader(hdr) { }
     virtual ~Box() { }
 
-    static std::shared_ptr<Box> read(std::istream&, uint64_t& sizeLimit);
+    static std::shared_ptr<Box> read(BitstreamRange& range);
 
     virtual Error write(std::ostream& ostr) const { return Error::OK; }
 
     virtual std::string dump() const;
 
   protected:
-    virtual Error parse(std::istream& istr, uint64_t& sizeLimit);
+    virtual Error parse(BitstreamRange& range);
 
     std::vector<std::shared_ptr<Box>> m_children;
 
-    Error readChildren(std::istream& istr, uint64_t& sizeLimit);
+    Error read_children(BitstreamRange& range);
 
     std::string dumpChildren() const;
   };
 
 
+  /*
   class BoxFull : public Box {
   public:
   BoxFull(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
-    uint8_t get_version() const { return m_version; }
-
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit) override;
+    Error parse(BitstreamRange& range) override;
 
   private:
-    uint8_t m_version = 0;
-    uint32_t m_flags = 0;
   };
-
+*/
 
   class Box_ftyp : public Box {
   public:
@@ -158,7 +220,7 @@ namespace heif {
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
   private:
     uint32_t m_major_brand;
@@ -167,25 +229,25 @@ namespace heif {
   };
 
 
-  class Box_meta : public BoxFull {
+  class Box_meta : public Box {
   public:
-  Box_meta(const BoxHeader& hdr) : BoxFull(hdr) { }
+  Box_meta(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
   };
 
 
-  class Box_hdlr : public BoxFull {
+  class Box_hdlr : public Box {
   public:
-  Box_hdlr(const BoxHeader& hdr) : BoxFull(hdr) { }
+  Box_hdlr(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
   private:
     uint32_t m_pre_defined;
@@ -195,28 +257,28 @@ namespace heif {
   };
 
 
-  class Box_pitm : public BoxFull {
+  class Box_pitm : public Box {
   public:
-  Box_pitm(const BoxHeader& hdr) : BoxFull(hdr) { }
+  Box_pitm(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
   private:
     uint16_t m_item_ID;
   };
 
 
-  class Box_iloc : public BoxFull {
+  class Box_iloc : public Box {
   public:
-  Box_iloc(const BoxHeader& hdr) : BoxFull(hdr) { }
+  Box_iloc(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
   private:
     uint16_t m_item_ID;
@@ -238,14 +300,14 @@ namespace heif {
   };
 
 
-  class Box_infe : public BoxFull {
+  class Box_infe : public Box {
   public:
-  Box_infe(const BoxHeader& hdr) : BoxFull(hdr) { }
+  Box_infe(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
   private:
       uint16_t m_item_ID;
@@ -259,17 +321,54 @@ namespace heif {
     };
 
 
-  class Box_iinf : public BoxFull {
+  class Box_iinf : public Box {
   public:
-  Box_iinf(const BoxHeader& hdr) : BoxFull(hdr) { }
+  Box_iinf(const BoxHeader& hdr) : Box(hdr) { }
 
     std::string dump() const override;
 
   protected:
-    Error parse(std::istream& istr, uint64_t& sizeLimit);
+    Error parse(BitstreamRange& range);
 
   private:
-    std::vector< std::shared_ptr<Box_infe> > m_iteminfos;
+    //std::vector< std::shared_ptr<Box_infe> > m_iteminfos;
+  };
+
+
+  class Box_iprp : public Box {
+  public:
+  Box_iprp(const BoxHeader& hdr) : Box(hdr) { }
+
+    std::string dump() const override;
+
+  protected:
+    Error parse(BitstreamRange& range);
+  };
+
+
+  class Box_ipco : public Box {
+  public:
+  Box_ipco(const BoxHeader& hdr) : Box(hdr) { }
+
+    std::string dump() const override;
+
+  protected:
+    Error parse(BitstreamRange& range);
+  };
+
+
+  class Box_ispe : public Box {
+  public:
+  Box_ispe(const BoxHeader& hdr) : Box(hdr) { }
+
+    std::string dump() const override;
+
+  protected:
+    Error parse(BitstreamRange& range);
+
+  private:
+    uint32_t m_image_width;
+    uint32_t m_image_height;
   };
 }
 
