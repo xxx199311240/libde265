@@ -31,6 +31,15 @@
 
 namespace heif {
 
+  constexpr uint32_t fourcc(const char* string)
+  {
+    return ((string[0]<<24) |
+            (string[1]<<16) |
+            (string[2]<< 8) |
+            (string[3]));
+  }
+
+
   class Error
   {
   public:
@@ -140,6 +149,29 @@ namespace heif {
   };
 
 
+  class Indent {
+  public:
+  Indent() : m_indent(0) { }
+
+    int get_indent() const { return m_indent; }
+
+    void operator++(int) { m_indent++; }
+    void operator--(int) { m_indent--; if (m_indent<0) m_indent=0; }
+
+  private:
+    int m_indent;
+  };
+
+
+  inline std::ostream& operator<<(std::ostream& ostr, const Indent& indent) {
+    for (int i=0;i<indent.get_indent();i++) {
+      ostr << "| ";
+    }
+
+    return ostr;
+  }
+
+
   class BoxHeader {
   public:
     BoxHeader();
@@ -161,7 +193,7 @@ namespace heif {
 
     Error write(std::ostream& ostr) const;
 
-    std::string dump() const;
+    std::string dump(Indent&) const;
 
 
     // --- full box
@@ -195,7 +227,9 @@ namespace heif {
 
     virtual Error write(std::ostream& ostr) const { return Error::OK; }
 
-    virtual std::string dump() const;
+    virtual std::string dump(Indent&) const;
+
+    std::shared_ptr<Box> get_child_box(uint32_t short_type) const;
 
   protected:
     virtual Error parse(BitstreamRange& range);
@@ -204,29 +238,15 @@ namespace heif {
 
     Error read_children(BitstreamRange& range);
 
-    std::string dumpChildren() const;
+    std::string dump_children(Indent&) const;
   };
 
-
-  /*
-  class BoxFull : public Box {
-  public:
-  BoxFull(const BoxHeader& hdr) : Box(hdr) { }
-
-    std::string dump() const override;
-
-  protected:
-    Error parse(BitstreamRange& range) override;
-
-  private:
-  };
-*/
 
   class Box_ftyp : public Box {
   public:
   Box_ftyp(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -242,7 +262,7 @@ namespace heif {
   public:
   Box_meta(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -253,7 +273,7 @@ namespace heif {
   public:
   Box_hdlr(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -270,7 +290,7 @@ namespace heif {
   public:
   Box_pitm(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -284,13 +304,7 @@ namespace heif {
   public:
   Box_iloc(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
-
-  protected:
-    Error parse(BitstreamRange& range);
-
-  private:
-    uint16_t m_item_ID;
+    std::string dump(Indent&) const override;
 
     struct Extent {
       uint64_t offset;
@@ -305,6 +319,16 @@ namespace heif {
       std::vector<Extent> extents;
     };
 
+    const std::vector<Item>& get_items() const { return m_items; }
+
+    std::vector<uint8_t> read_all_data(std::istream& istr) const;
+
+  protected:
+    Error parse(BitstreamRange& range);
+
+  private:
+    uint16_t m_item_ID;
+
     std::vector<Item> m_items;
   };
 
@@ -313,7 +337,7 @@ namespace heif {
   public:
   Box_infe(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -334,7 +358,7 @@ namespace heif {
   public:
   Box_iinf(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -348,7 +372,7 @@ namespace heif {
   public:
   Box_iprp(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -359,7 +383,7 @@ namespace heif {
   public:
   Box_ipco(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -370,7 +394,7 @@ namespace heif {
   public:
   Box_ispe(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
 
   protected:
     Error parse(BitstreamRange& range);
@@ -385,7 +409,9 @@ namespace heif {
   public:
   Box_hvcC(const BoxHeader& hdr) : Box(hdr) { }
 
-    std::string dump() const override;
+    std::string dump(Indent&) const override;
+
+    std::vector<uint8_t> get_headers() const;
 
   protected:
     Error parse(BitstreamRange& range);

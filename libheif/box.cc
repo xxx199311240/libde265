@@ -32,15 +32,6 @@ using namespace heif;
 heif::Error heif::Error::OK(heif::Error::Ok);
 
 
-constexpr uint32_t fourcc(const char* string)
-{
-  return ((string[0]<<24) |
-          (string[1]<<16) |
-          (string[2]<< 8) |
-          (string[3]));
-}
-
-
 std::string to_fourcc(uint32_t code)
 {
   std::string str("    ");
@@ -226,15 +217,15 @@ heif::Error heif::BoxHeader::write(std::ostream& ostr) const
 }
 
 
-std::string BoxHeader::dump() const
+std::string BoxHeader::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << "Box: " << get_type_string() << "\n";
-  sstr << "size: " << get_box_size() << "   (header size: " << get_header_size() << ")\n";
+  sstr << indent << "Box: " << get_type_string() << "\n";
+  sstr << indent << "size: " << get_box_size() << "   (header size: " << get_header_size() << ")\n";
 
   if (m_is_full_box) {
-    sstr << "version: " << ((int)m_version) << "\n"
-         << "flags: " << std::hex << m_flags << "\n";
+    sstr << indent << "version: " << ((int)m_version) << "\n"
+         << indent << "flags: " << std::hex << m_flags << "\n";
   }
 
   return sstr.str();
@@ -346,13 +337,25 @@ std::shared_ptr<heif::Box> Box::read(BitstreamRange& range)
 }
 
 
-std::string Box::dump() const
+std::string Box::dump(Indent& indent ) const
 {
   std::stringstream sstr;
 
-  sstr << BoxHeader::dump();
+  sstr << BoxHeader::dump(indent);
 
   return sstr.str();
+}
+
+
+std::shared_ptr<Box> Box::get_child_box(uint32_t short_type) const
+{
+  for (auto& box : m_children) {
+    if (box->get_short_type()==short_type) {
+      return box;
+    }
+  }
+
+  return nullptr;
 }
 
 
@@ -370,24 +373,24 @@ Error Box::read_children(BitstreamRange& range)
 }
 
 
-std::string Box::dumpChildren() const
+std::string Box::dump_children(Indent& indent) const
 {
   std::stringstream sstr;
 
   bool first = true;
 
-  sstr << ">>>\n";
+  indent++;
   for (const auto& childBox : m_children) {
     if (first) {
       first=false;
     }
     else {
-      sstr << "\n";
+      sstr << indent << "\n";
     }
 
-    sstr << childBox->dump();
+    sstr << childBox->dump(indent);
   }
-  sstr << "<<<\n";
+  indent--;
 
   return sstr.str();
 }
@@ -408,15 +411,15 @@ Error Box_ftyp::parse(BitstreamRange& range)
 }
 
 
-std::string Box_ftyp::dump() const
+std::string Box_ftyp::dump(Indent& indent) const
 {
   std::stringstream sstr;
 
-  sstr << BoxHeader::dump();
+  sstr << BoxHeader::dump(indent);
 
-  sstr << "major brand: " << to_fourcc(m_major_brand) << "\n"
-       << "minor version: " << m_minor_version << "\n"
-       << "compatible brands: ";
+  sstr << indent << "major brand: " << to_fourcc(m_major_brand) << "\n"
+       << indent << "minor version: " << m_minor_version << "\n"
+       << indent << "compatible brands: ";
 
   bool first=true;
   for (uint32_t brand : m_compatible_brands) {
@@ -451,11 +454,11 @@ Error Box_meta::parse(BitstreamRange& range)
 }
 
 
-std::string Box_meta::dump() const
+std::string Box_meta::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
-  sstr << dumpChildren();
+  sstr << Box::dump(indent);
+  sstr << dump_children(indent);
 
   return sstr.str();
 }
@@ -478,13 +481,13 @@ Error Box_hdlr::parse(BitstreamRange& range)
 }
 
 
-std::string Box_hdlr::dump() const
+std::string Box_hdlr::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
-  sstr << "pre_defined: " << m_pre_defined << "\n"
-       << "handler_type: " << to_fourcc(m_handler_type) << "\n"
-       << "name: " << m_name << "\n";
+  sstr << Box::dump(indent);
+  sstr << indent << "pre_defined: " << m_pre_defined << "\n"
+       << indent << "handler_type: " << to_fourcc(m_handler_type) << "\n"
+       << indent << "name: " << m_name << "\n";
 
   return sstr.str();
 }
@@ -500,11 +503,11 @@ Error Box_pitm::parse(BitstreamRange& range)
 }
 
 
-std::string Box_pitm::dump() const
+std::string Box_pitm::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
-  sstr << "item_ID: " << m_item_ID << "\n";
+  sstr << Box::dump(indent);
+  sstr << indent << "item_ID: " << m_item_ID << "\n";
 
   return sstr.str();
 }
@@ -581,17 +584,18 @@ Error Box_iloc::parse(BitstreamRange& range)
 }
 
 
-std::string Box_iloc::dump() const
+std::string Box_iloc::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
   for (const Item& item : m_items) {
-    sstr << "item ID: " << item.item_ID << "\n"
-         << "  data_reference_index: " << std::hex << item.data_reference_index << std::dec << "\n"
-         << "  base_offset: " << item.base_offset << "\n";
+    sstr << indent << "item ID: " << item.item_ID << "\n"
+         << indent<< "  data_reference_index: " << std::hex
+         << item.data_reference_index << std::dec << "\n"
+         << indent << "  base_offset: " << item.base_offset << "\n";
 
-    sstr << "  extents: ";
+    sstr << indent << "  extents: ";
     for (const Extent& extent : item.extents) {
       sstr << extent.offset << "," << extent.length << " ";
     }
@@ -599,6 +603,42 @@ std::string Box_iloc::dump() const
   }
 
   return sstr.str();
+}
+
+
+std::vector<uint8_t> Box_iloc::read_all_data(std::istream& istr) const
+{
+  std::vector<uint8_t> data;
+
+  for (const auto& item : m_items) {
+    for (const auto& extent : item.extents) {
+      istr.seekg(extent.offset + item.base_offset, std::ios::beg);
+
+      uint64_t bytes_read = 0;
+
+      for (;;) {
+        data.push_back(0);
+        data.push_back(0);
+        data.push_back(1);
+
+        uint8_t size[4];
+        istr.read((char*)size,4);
+        uint32_t size32 = (size[0]<<24) | (size[1]<<16) | (size[2]<<8) | size[3];
+
+        size_t old_size = data.size();
+        data.resize( old_size + size32);
+        istr.read((char*)data.data() + old_size, size32);
+
+        bytes_read += size32 +4;
+
+        if (bytes_read >= extent.length) {
+          break;
+        }
+      }
+    }
+  }
+
+  return data;
 }
 
 
@@ -643,18 +683,18 @@ Error Box_infe::parse(BitstreamRange& range)
 }
 
 
-std::string Box_infe::dump() const
+std::string Box_infe::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
-  sstr << "item_ID: " << m_item_ID << "\n"
-       << "item_protection_index: " << m_item_protection_index << "\n"
-       << "item_type: " << m_item_type << "\n"
-       << "item_name: " << m_item_name << "\n"
-       << "content_type: " << m_content_type << "\n"
-       << "content_encoding: " << m_content_encoding << "\n"
-       << "item uri type: " << m_item_uri_type << "\n";
+  sstr << indent << "item_ID: " << m_item_ID << "\n"
+       << indent << "item_protection_index: " << m_item_protection_index << "\n"
+       << indent << "item_type: " << m_item_type << "\n"
+       << indent << "item_name: " << m_item_name << "\n"
+       << indent << "content_type: " << m_content_type << "\n"
+       << indent << "content_encoding: " << m_content_encoding << "\n"
+       << indent << "item uri type: " << m_item_uri_type << "\n";
 
   return sstr.str();
 }
@@ -680,20 +720,12 @@ Error Box_iinf::parse(BitstreamRange& range)
 }
 
 
-std::string Box_iinf::dump() const
+std::string Box_iinf::dump(Indent& indent ) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
-  /*
-  sstr << ">>> items >>>\n";
-  for (auto& item : m_iteminfos) {
-    sstr << item->dump();
-  }
-  sstr << "<<< items <<<\n";
-  */
-
-  sstr << dumpChildren();
+  sstr << dump_children(indent);
 
   return sstr.str();
 }
@@ -709,20 +741,12 @@ Error Box_iprp::parse(BitstreamRange& range)
 }
 
 
-std::string Box_iprp::dump() const
+std::string Box_iprp::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
-  /*
-  sstr << ">>> items >>>\n";
-  for (auto& item : m_iteminfos) {
-    sstr << item->dump();
-  }
-  sstr << "<<< items <<<\n";
-  */
-
-  sstr << dumpChildren();
+  sstr << dump_children(indent);
 
   return sstr.str();
 }
@@ -738,20 +762,12 @@ Error Box_ipco::parse(BitstreamRange& range)
 }
 
 
-std::string Box_ipco::dump() const
+std::string Box_ipco::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
-  /*
-  sstr << ">>> items >>>\n";
-  for (auto& item : m_iteminfos) {
-    sstr << item->dump();
-  }
-  sstr << "<<< items <<<\n";
-  */
-
-  sstr << dumpChildren();
+  sstr << dump_children(indent);
 
   return sstr.str();
 }
@@ -768,13 +784,13 @@ Error Box_ispe::parse(BitstreamRange& range)
 }
 
 
-std::string Box_ispe::dump() const
+std::string Box_ispe::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
-  sstr << "image width: " << m_image_width << "\n"
-       << "image height: " << m_image_height << "\n";
+  sstr << indent << "image width: " << m_image_width << "\n"
+       << indent << "image height: " << m_image_height << "\n";
 
   return sstr.str();
 }
@@ -850,44 +866,83 @@ Error Box_hvcC::parse(BitstreamRange& range)
 }
 
 
-std::string Box_hvcC::dump() const
+std::string Box_hvcC::dump(Indent& indent) const
 {
   std::stringstream sstr;
-  sstr << Box::dump();
+  sstr << Box::dump(indent);
 
-  sstr << "configuration_version: " << ((int)m_configuration_version) << "\n"
-       << "general_profile_space: " << ((int)m_general_profile_space) << "\n"
-       << "general_tier_flag: " << m_general_tier_flag << "\n"
-       << "general_profile_idc: " << ((int)m_general_profile_idc) << "\n"
-       << "general_profile_compatibility_flags: 0x" << std::hex << m_general_profile_compatibility_flags << std::dec << "\n"
-       << "general_constraint_indicator_flags: " << "---TODO---\n"
-       << "general_level_idc: " << ((int)m_general_level_idc) << "\n"
-       << "min_spatial_segmentation_idc: " << m_min_spatial_segmentation_idc << "\n"
-       << "parallelism_type: " << ((int)m_parallelism_type) << "\n"
-       << "chroma_format: " << ((int)m_chroma_format) << "\n"
-       << "bit_depth_luma: " << ((int)m_bit_depth_luma) << "\n"
-       << "bit_depth_chroma: " << ((int)m_bit_depth_chroma) << "\n"
-       << "avg_frame_rate: " << m_avg_frame_rate << "\n"
-       << "constant_frame_rate: " << ((int)m_constant_frame_rate) << "\n"
-       << "num_temporal_layers: " << ((int)m_num_temporal_layers) << "\n"
-       << "temporal_id_nested: " << ((int)m_temporal_id_nested) << "\n"
-       << "length_size: " << ((int)m_length_size) << "\n";
+  sstr << indent << "configuration_version: " << ((int)m_configuration_version) << "\n"
+       << indent << "general_profile_space: " << ((int)m_general_profile_space) << "\n"
+       << indent << "general_tier_flag: " << m_general_tier_flag << "\n"
+       << indent << "general_profile_idc: " << ((int)m_general_profile_idc) << "\n";
+
+  sstr << indent << "general_profile_compatibility_flags: ";
+  for (int i=0;i<32;i++) {
+    sstr << ((m_general_profile_compatibility_flags>>(31-i))&1);
+    if ((i%8)==7) sstr << ' ';
+    else if ((i%4)==3) sstr << '.';
+  }
+  sstr << "\n";
+
+  sstr << indent << "general_constraint_indicator_flags: ";
+  int cnt=0;
+  for (bool b : m_general_constraint_indicator_flags) {
+    sstr << (b ? 1:0);
+    cnt++;
+    if ((cnt%8)==0)
+      sstr << ' ';
+  }
+  sstr << "\n";
+
+  sstr << indent << "general_level_idc: " << ((int)m_general_level_idc) << "\n"
+       << indent << "min_spatial_segmentation_idc: " << m_min_spatial_segmentation_idc << "\n"
+       << indent << "parallelism_type: " << ((int)m_parallelism_type) << "\n"
+       << indent << "chroma_format: " << ((int)m_chroma_format) << "\n"
+       << indent << "bit_depth_luma: " << ((int)m_bit_depth_luma) << "\n"
+       << indent << "bit_depth_chroma: " << ((int)m_bit_depth_chroma) << "\n"
+       << indent << "avg_frame_rate: " << m_avg_frame_rate << "\n"
+       << indent << "constant_frame_rate: " << ((int)m_constant_frame_rate) << "\n"
+       << indent << "num_temporal_layers: " << ((int)m_num_temporal_layers) << "\n"
+       << indent << "temporal_id_nested: " << ((int)m_temporal_id_nested) << "\n"
+       << indent << "length_size: " << ((int)m_length_size) << "\n";
 
   for (const auto& array : m_nal_array) {
-    sstr << "<array>\n"
-         << "array_completeness: " << ((int)array.m_array_completeness) << "\n"
-         << "NAL_unit_type: " << ((int)array.m_NAL_unit_type) << "\n";
+    sstr << indent << "<array>\n";
+
+    indent++;
+    sstr << indent << "array_completeness: " << ((int)array.m_array_completeness) << "\n"
+         << indent << "NAL_unit_type: " << ((int)array.m_NAL_unit_type) << "\n";
 
     for (const auto& unit : array.m_nal_units) {
       //sstr << "  unit with " << unit.size() << " bytes of data\n";
-      sstr << std::hex << std::setw(2) << std::setfill('0');
+      sstr << indent;
       for (uint8_t b : unit) {
-        sstr << ((int)b) << " ";
+        sstr << std::setfill('0') << std::setw(2) << std::hex << ((int)b) << " ";
       }
       sstr << "\n";
       sstr << std::dec;
     }
+
+    indent--;
   }
 
   return sstr.str();
+}
+
+
+std::vector<uint8_t> Box_hvcC::get_headers() const
+{
+  std::vector<uint8_t> data;
+
+  for (const auto& array : m_nal_array) {
+    for (const auto& unit : array.m_nal_units) {
+      data.push_back(0);
+      data.push_back(0);
+      data.push_back(1);
+
+      data.insert(data.end(), unit.begin(), unit.end());
+    }
+  }
+
+  return data;
 }

@@ -26,8 +26,8 @@ bin_PROGRAMS = heif
 
 # AM_CPPFLAGS = -I../libde265
 
-heif_DEPENDENCIES = libheif.la # ../libde265/libde265.la
+heif_DEPENDENCIES = libheif.la ../libde265/libde265.la
 heif_CXXFLAGS =
 heif_LDFLAGS =
-heif_LDADD = libheif.la -lstdc++ # ../libde265/libde265.la -lstdc++
+heif_LDADD = libheif.la ../libde265/libde265.la -lstdc++
 heif_SOURCES = heif.cc
