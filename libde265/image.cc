@@ -488,6 +488,7 @@ void de265_image::release()
                                    encctx->param_image_allocation_userdata);
       }
       else*/ {
+          if(NULL != image_allocation_functions.release_buffer)
         image_allocation_functions.release_buffer(decctx, this,
                                                   decctx ?
                                                   decctx->param_image_allocation_userdata :
